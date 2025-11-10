@@ -1,6 +1,6 @@
 # MANIFEST.in - Include necessary files/directories in source distribution
 
-recursive-include conf *
+recursive-include rock-conf *
 recursive-exclude tests *
 recursive-exclude examples *
 recursive-exclude docs *

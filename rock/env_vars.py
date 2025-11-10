@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     ROCK_PYTHON_ENV_PATH: str | None = None
     ROCK_ADMIN_ENV: str | None = "dev"
     ROCK_ADMIN_ROLE: str | None = "write"
-    ROCK_CLI_LOAD_PATHS: str = "rock/cli/command"
+    ROCK_CLI_LOAD_PATHS: str = str(Path(__file__).parent / "cli" / "command")
     ROCK_CLI_DEFAULT_CONFIG_PATH: str
 
 
@@ -55,12 +55,12 @@ environment_variables: dict[str, Callable[[], Any]] = {
     "ROCK_OSS_BUCKET_REGION": lambda: os.getenv("ROCK_OSS_BUCKET_REGION"),
     "ROCK_PIP_INDEX_URL": lambda: os.getenv("ROCK_PIP_INDEX_URL", "https://mirrors.aliyun.com/pypi/simple/"),
     "ROCK_MONITOR_ENABLE": lambda: os.getenv("ROCK_MONITOR_ENABLE", "false").lower() == "true",
-    "ROCK_PROJECT_ROOT": lambda: str(Path(__file__).resolve().parents[1]),
+    "ROCK_PROJECT_ROOT": lambda: os.getenv("ROCK_PROJECT_ROOT", str(Path(__file__).resolve().parents[1])),
     "ROCK_WORKER_ENV_TYPE": lambda: os.getenv("ROCK_WORKER_ENV_TYPE", "local"),
     "ROCK_PYTHON_ENV_PATH": lambda: os.getenv("ROCK_PYTHON_ENV_PATH", sys.base_prefix),
     "ROCK_ADMIN_ENV": lambda: os.getenv("ROCK_ADMIN_ENV", "dev"),
     "ROCK_ADMIN_ROLE": lambda: os.getenv("ROCK_ADMIN_ROLE", "write"),
-    "ROCK_CLI_LOAD_PATHS": lambda: os.getenv("ROCK_CLI_LOAD_PATHS", "rock/cli/command"),
+    "ROCK_CLI_LOAD_PATHS": lambda: os.getenv("ROCK_CLI_LOAD_PATHS", str(Path(__file__).parent / "cli" / "command")),
     "ROCK_CLI_DEFAULT_CONFIG_PATH": lambda: os.getenv(
         "ROCK_CLI_DEFAULT_CONFIG_PATH", Path.home() / ".rock" / "config.ini"
     ),
