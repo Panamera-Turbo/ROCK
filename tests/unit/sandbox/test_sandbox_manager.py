@@ -19,6 +19,7 @@ logger = logging.getLogger(__file__)
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_async_sandbox_start(sandbox_manager: SandboxManager):
     response = await sandbox_manager.start_async(DockerDeploymentConfig())
@@ -43,6 +44,7 @@ async def test_async_sandbox_start(sandbox_manager: SandboxManager):
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_get_status(sandbox_manager):
     response = await sandbox_manager.start_async(DockerDeploymentConfig(image="python:3.11"))
@@ -65,6 +67,7 @@ async def test_get_status(sandbox_manager):
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_ray_actor_is_alive(sandbox_manager):
     docker_deploy_config = DockerDeploymentConfig()
@@ -80,7 +83,7 @@ async def test_ray_actor_is_alive(sandbox_manager):
 
     assert not await sandbox_manager._is_actor_alive(response.sandbox_id)
 
-
+@pytest.mark.need_docker
 @pytest.mark.need_ray
 @pytest.mark.asyncio
 async def test_user_info_set_success(sandbox_manager):
@@ -112,6 +115,7 @@ def test_set_sandbox_status_response():
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_resource_limit_exception(sandbox_manager, docker_deployment_config):
     docker_deployment_config.cpus = 20
@@ -121,6 +125,7 @@ async def test_resource_limit_exception(sandbox_manager, docker_deployment_confi
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_resource_limit_exception_memory(sandbox_manager, docker_deployment_config):
     docker_deployment_config.memory = "65g"
@@ -140,6 +145,7 @@ async def test_get_system_resource_info(sandbox_manager):
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_get_status_state(sandbox_manager):
     response = await sandbox_manager.start_async(
@@ -153,6 +159,7 @@ async def test_get_status_state(sandbox_manager):
 
 
 @pytest.mark.need_ray
+@pytest.mark.need_docker
 @pytest.mark.asyncio
 async def test_sandbox_start_with_sandbox_id(sandbox_manager):
     try:
@@ -181,3 +188,16 @@ async def test_get_actor_not_exist_raises_value_error(sandbox_manager):
         actor_name = sandbox_manager.deployment_manager.get_actor_name(sandbox_id)
         await sandbox_manager._ray_service.async_ray_get_actor(actor_name)
     assert exc_info.type == ValueError
+
+
+from unittest.mock import patch
+
+
+@pytest.mark.need_ray
+@pytest.mark.asyncio
+async def test_start_async_raises_when_docker_unavailable(sandbox_manager):
+    """Verify start_async raises BadRequestRockError when Docker is not available."""
+    with patch("rock.sandbox.sandbox_manager.DockerSandboxValidator") as MockValidator:
+        MockValidator.return_value.check_availability.return_value = False
+        with pytest.raises(BadRequestRockError, match="Docker is not available"):
+            await sandbox_manager.start_async(DockerDeploymentConfig())
