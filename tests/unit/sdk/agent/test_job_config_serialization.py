@@ -26,7 +26,7 @@ class TestRockEnvironmentConfigInheritance:
         assert env.image == "python:3.11"
         assert env.memory == "8g"
         assert env.cpus == 2.0
-        assert env.cluster == "zb"
+        assert env.cluster == "vpc-nt-a"
 
     def test_inherits_harbor_env_fields(self):
         env = RockEnvironmentConfig()

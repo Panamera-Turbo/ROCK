@@ -38,7 +38,7 @@ class SandboxConfig(BaseConfig):
     limit_cpus: float | None = None
     user_id: str | None = None
     experiment_id: str | None = None
-    cluster: str = "zb"
+    cluster: str = env_vars.ROCK_DEFAULT_CLUSTER
     namespace: str | None = None
     registry_username: str | None = None
     registry_password: str | None = None
