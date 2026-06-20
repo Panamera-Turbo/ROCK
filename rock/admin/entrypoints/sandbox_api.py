@@ -141,7 +141,14 @@ async def _http_probe_manifest(
 ) -> bool:
     """Check whether ``repo:tag`` exists on *registry* via the v2 manifest API."""
     url = f"https://{registry}/v2/{repo}/manifests/{tag}"
-    headers = {"Accept": "application/vnd.docker.distribution.manifest.v2+json"}
+    headers = {
+        "Accept": ", ".join([
+            "application/vnd.docker.distribution.manifest.v2+json",
+            "application/vnd.oci.image.manifest.v1+json",
+            "application/vnd.docker.distribution.manifest.list.v2+json",
+            "application/vnd.oci.image.index.v1+json",
+        ])
+    }
     auth = (username, password) if username and password else None
 
     async with httpx.AsyncClient(timeout=timeout) as client:
