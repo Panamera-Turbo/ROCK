@@ -49,7 +49,8 @@ class SandboxStatusResponse(BaseModel):
     namespace: str | None = None
     cpus: float | None = None
     memory: str | None = None
-    disk_limit_rootfs: str | None = None
+    disk: str | None = None
+    disk_limit_rootfs: str | None = Field(default=None, deprecated="Use 'disk' instead")
     state: State | None = None
     start_time: str | None = None
     stop_time: str | None = None
