@@ -65,23 +65,11 @@ class SandboxProxyService:
         self.proxy_config: ProxyServiceConfig = rock_config.proxy_service
         logger.info(f"proxy config: {self.proxy_config}")
         # Control-plane RPC client: short JSON calls to rocklet.
-        self._rpc_client = httpx.AsyncClient(
-            timeout=self.proxy_config.timeout,
-            limits=httpx.Limits(
-                max_connections=self.proxy_config.max_connections,
-                max_keepalive_connections=self.proxy_config.max_keepalive_connections,
-            ),
-        )
+        self._rpc_client = rock_config.http_pool_manager.get("rpc")
         # Data-plane proxy client: streaming/SSE/large bodies. No total timeout;
         # per-request timeout is set via build_request(timeout=...). NEVER closed
         # per-request — lives for the process lifetime, closed in aclose().
-        self._proxy_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(None),
-            limits=httpx.Limits(
-                max_connections=self.proxy_config.max_connections,
-                max_keepalive_connections=self.proxy_config.max_keepalive_connections,
-            ),
-        )
+        self._proxy_client = rock_config.http_pool_manager.get("proxy")
 
         # Replace single self.sts_client with a dict keyed by account name,
         # so /get_token?account=legacy|primary maps to the right credentials.
@@ -107,9 +95,8 @@ class SandboxProxyService:
         self._validate_oss_config_or_warn()
 
     async def aclose(self) -> None:
-        """Close both shared httpx clients. Called on proxy shutdown."""
-        await self._rpc_client.aclose()
-        await self._proxy_client.aclose()
+        """No-op: clients are now managed by HttpPoolManager and closed in lifespan."""
+        pass
 
     def _validate_oss_config_or_warn(self) -> None:
         # Same resolution order as gen_oss_sts_token: env > YAML

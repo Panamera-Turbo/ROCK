@@ -1,6 +1,7 @@
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -229,6 +230,15 @@ class ProxyServiceConfig:
 
 
 @dataclass
+class HttpPoolConfig:
+    """Configuration for a single named httpx.AsyncClient connection pool."""
+
+    timeout: float = 5.0
+    max_connections: int = 100
+    max_keepalive_connections: int = 20
+
+
+@dataclass
 class DatabaseConfig:
     # Supported URL formats:
     #   SQLite:     sqlite:///relative/path.db  or  sqlite:////absolute/path.db
@@ -432,6 +442,14 @@ class RockConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     image_registry_mirrors: list[ImageRegistryMirror] = field(default_factory=list)
     image_mirror_lookup_allowlist: list[str] = field(default_factory=list)
+    http_pools: dict[str, HttpPoolConfig] = field(
+        default_factory=lambda: {
+            "probe": HttpPoolConfig(timeout=5.0, max_connections=300, max_keepalive_connections=300),
+            "rpc": HttpPoolConfig(timeout=180.0, max_connections=500, max_keepalive_connections=100),
+            "proxy": HttpPoolConfig(timeout=None, max_connections=500, max_keepalive_connections=100),
+        }
+    )
+    http_pool_manager: Any = field(default=None, init=False, repr=False)
     nacos_provider: NacosConfigProvider | None = None
 
     @classmethod
@@ -489,6 +507,9 @@ class RockConfig:
             kwargs["scheduler"] = SchedulerConfig(**config["scheduler"])
         if "database" in config:
             kwargs["database"] = DatabaseConfig(**config["database"])
+        if "http_pools" in config:
+            raw_pools = config["http_pools"] or {}
+            kwargs["http_pools"] = {name: HttpPoolConfig(**params) for name, params in raw_pools.items()}
         if "image_registry_mirrors" in config:
             raw_mirrors = config["image_registry_mirrors"] or []
             kwargs["image_registry_mirrors"] = [ImageRegistryMirror(**m) for m in raw_mirrors]
@@ -557,6 +578,10 @@ class RockConfig:
         return result
 
     def __post_init__(self) -> None:
+        from rock.utils.http_pool import HttpPoolManager
+
+        self.http_pool_manager = HttpPoolManager(self.http_pools)
+
         logger.info(f"init RockConfig: {self}")
 
         if self.nacos.endpoint or self.nacos.server_addresses:
@@ -589,7 +614,7 @@ class RockConfig:
 
         # Update configs that are present in nacos_result (field-level merge,
         # then re-run __post_init__ to coerce nested dicts → dataclasses)
-        for key, (config_class, attr_name) in config_map.items():
+        for key, (_, attr_name) in config_map.items():
             if key in nacos_result:
                 existing = getattr(self, attr_name)
                 for field_name, value in nacos_result[key].items():
@@ -608,7 +633,6 @@ class RockConfig:
             runtime_overrides = nacos_result["runtime"]
             if "instance_registry_mirrors" in runtime_overrides:
                 self.runtime.instance_registry_mirrors = list(runtime_overrides["instance_registry_mirrors"] or [])
-
 
         logger.info(
             f"Updated config from Nacos: sandbox_config={self.sandbox_config}, proxy_service={self.proxy_service}"

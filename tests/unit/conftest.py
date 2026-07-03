@@ -136,7 +136,8 @@ async def sandbox_proxy_service(
         redis_provider=redis_provider, sandbox_table=_memory_sandbox_table, rock_config=rock_config
     )
     sandbox_proxy_service = SandboxProxyService(rock_config, meta_store=meta_store)
-    return sandbox_proxy_service
+    yield sandbox_proxy_service
+    await rock_config.http_pool_manager.aclose_all()
 
 
 @pytest.fixture(scope="session")

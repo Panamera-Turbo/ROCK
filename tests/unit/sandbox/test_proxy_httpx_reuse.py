@@ -23,9 +23,10 @@ async def test_metrics_monitor_has_worker_pid_tag(sandbox_proxy_service):
 
 
 @pytest.mark.asyncio
-async def test_aclose_closes_both_clients(sandbox_proxy_service):
+async def test_aclose_closes_both_clients(sandbox_proxy_service, rock_config):
     svc = sandbox_proxy_service
-    await svc.aclose()
+    # Clients are now managed by HttpPoolManager, not SandboxProxyService.aclose()
+    await rock_config.http_pool_manager.aclose_all()
     assert svc._rpc_client.is_closed
     assert svc._proxy_client.is_closed
 

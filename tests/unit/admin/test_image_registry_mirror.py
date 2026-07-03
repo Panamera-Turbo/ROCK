@@ -21,11 +21,14 @@ def _make_manager(mirrors, allowlist=None):
     Default allowlist is ``["*"]`` so callers that don't care about the gate
     keep the legacy "check every image" semantics.
     """
+    pool_manager = MagicMock()
+    pool_manager.get.return_value = MagicMock()
     return SimpleNamespace(
         rock_config=SimpleNamespace(
             image_registry_mirrors=mirrors,
             image_mirror_lookup_allowlist=["*"] if allowlist is None else allowlist,
             nacos_provider=None,
+            http_pool_manager=pool_manager,
         )
     )
 
@@ -118,9 +121,7 @@ async def test_registry_only_miss_falls_back_to_namespace_replace(restore_sandbo
 
 async def test_original_namespace_equals_mirror_namespace_deduplicates(restore_sandbox_manager, stub_manifest_probe):
     """When original namespace matches mirror namespace, only one candidate is probed (no redundant request)."""
-    sandbox_api.sandbox_manager = _make_manager(
-        [ImageRegistryMirror(registry="rock-a.example.com", namespace="foo")]
-    )
+    sandbox_api.sandbox_manager = _make_manager([ImageRegistryMirror(registry="rock-a.example.com", namespace="foo")])
     config = DockerDeploymentConfig(image="gcr.io/foo/python:3.11")
     stub_manifest_probe.probe_results.append(True)
 
@@ -194,7 +195,9 @@ async def test_user_credentials_cleared_when_mirror_has_no_auth(restore_sandbox_
     sandbox_api.sandbox_manager = _make_manager(
         [ImageRegistryMirror(registry="rock-a.example.com", namespace="rock-public")]
     )
-    config = DockerDeploymentConfig(image="my-registry.io/myimage:v1", registry_username="orig-user", registry_password="orig-pw")
+    config = DockerDeploymentConfig(
+        image="my-registry.io/myimage:v1", registry_username="orig-user", registry_password="orig-pw"
+    )
     stub_manifest_probe.probe_results.append(True)
 
     await sandbox_api._apply_image_registry_mirror(config)
@@ -216,7 +219,9 @@ async def test_user_credentials_replaced_by_mirror_credentials(restore_sandbox_m
             ),
         ]
     )
-    config = DockerDeploymentConfig(image="my-registry.io/myimage:v1", registry_username="orig-user", registry_password="orig-pw")
+    config = DockerDeploymentConfig(
+        image="my-registry.io/myimage:v1", registry_username="orig-user", registry_password="orig-pw"
+    )
     stub_manifest_probe.probe_results.append(True)
 
     await sandbox_api._apply_image_registry_mirror(config)

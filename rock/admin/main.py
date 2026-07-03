@@ -218,6 +218,9 @@ async def lifespan(app: FastAPI):
         await proxy_service_ref.aclose()
         logger.info("proxy httpx clients closed")
 
+    await rock_config.http_pool_manager.aclose_all()
+    logger.info("http pool manager closed")
+
     if db_provider:
         await db_provider.close()
 
