@@ -24,6 +24,7 @@ class RayOperator(AbstractOperator):
     def __init__(self, ray_service: RayService, runtime_config: RuntimeConfig):
         self._ray_service = ray_service
         self._runtime_config = runtime_config
+        self._disk_scheduling_enabled = ray.is_initialized() and "disk" in ray.cluster_resources()
 
     def _get_actor_name(self, sandbox_id: str) -> str:
         return f"sandbox-{sandbox_id}"
@@ -50,7 +51,7 @@ class RayOperator(AbstractOperator):
             actor_options["num_cpus"] = config.cpus
             actor_options["memory"] = memory
             custom_resources: dict[str, float] = {}
-            if config.disk is not None:
+            if config.disk is not None and self._disk_scheduling_enabled:
                 disk_bytes = parse_size_to_bytes(config.disk)
                 if config.disk_overcommit_ratio and config.disk_overcommit_ratio > 1.0:
                     disk_bytes = int(disk_bytes / config.disk_overcommit_ratio)
@@ -103,8 +104,21 @@ class RayOperator(AbstractOperator):
         remote_status = await get_remote_status(sandbox_id, host_ip)
         is_alive = await check_alive_status(sandbox_id, host_ip, remote_status)
         # TODO: sink update state according to is_alive logic into SandboxInfo
+        was_pending = sandbox_info.get("state") == State.PENDING
         if is_alive:
             sandbox_info["state"] = State.RUNNING
+            if was_pending:
+                # In submit(), sandbox_info.remote() races with start.remote() on async
+                # actors, so the initial Redis write captures the pre-startup disk value.
+                # When the rocklet is responding, start() is guaranteed complete; query
+                # the actor to get the effective disk (None when storage-opt unsupported).
+                # on_alive will persist this value to Redis so subsequent calls skip here.
+                try:
+                    actor = await self._ray_service.async_ray_get_actor(self._get_actor_name(sandbox_id))
+                    actor_info = await self._ray_service.async_ray_get(actor.sandbox_info.remote(), timeout=5)
+                    sandbox_info["disk"] = actor_info.get("disk")
+                except Exception:
+                    pass
         sandbox_info.update(remote_status.to_dict())
         return sandbox_info
 
