@@ -8,9 +8,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import uvicorn
-from e2b import CommandExitException, Sandbox, TimeoutException
+from e2b import CommandExitException, FileNotFoundException, FileType, Sandbox, TimeoutException
 from fastapi import FastAPI, Request
 from httpx import AsyncClient
+from httpx import Request as HTTPXRequest
 
 from rock.actions.sandbox.response import State
 from rock.admin.entrypoints import e2b_api as e2b_api_module
@@ -70,6 +71,29 @@ class _HTTPClient:
         async with AsyncClient() as client:
             return await client.request(**kwargs)
 
+    def build_request(self, **kwargs):
+        return HTTPXRequest(**kwargs)
+
+    async def send(self, request, *, stream=False):
+        client = AsyncClient()
+        try:
+            response = await client.send(request, stream=stream)
+        except Exception:
+            await client.aclose()
+            raise
+        if not stream:
+            await client.aclose()
+            return response
+
+        close_response = response.aclose
+
+        async def close():
+            await close_response()
+            await client.aclose()
+
+        response.aclose = close
+        return response
+
 
 @pytest.fixture
 def e2b_command_stack(rocklet_remote_server):
@@ -109,6 +133,7 @@ def e2b_command_stack(rocklet_remote_server):
     sandbox_manager.metrics_monitor = None
     sandbox_manager._meta_store = meta_store
     sandbox_manager._rpc_client = _HTTPClient()
+    sandbox_manager._proxy_client = _HTTPClient()
 
     proxy_service = E2BProxyService(
         meta_store=meta_store,
@@ -165,6 +190,7 @@ def test_commands_run_success_end_to_end(e2b_command_stack, tmp_path):
         envs={"REQUEST": "request"},
         cwd=str(tmp_path),
         timeout=2.5,
+        user="root",
     )
 
     stdout_lines = result.stdout.splitlines()
@@ -174,6 +200,66 @@ def test_commands_run_success_end_to_end(e2b_command_stack, tmp_path):
     assert result.exit_code == 0
     assert ("/sandboxes", e2b_command_stack["api_key"]) in e2b_command_stack["control_headers"]
     assert ("/process.Process/Start", e2b_command_stack["api_key"]) in e2b_command_stack["data_headers"]
+
+
+def test_filesystem_operations_end_to_end(e2b_command_stack, tmp_path):
+    sandbox = _create_sandbox(e2b_command_stack)
+    root = tmp_path / "e2b-files"
+    nested = root / "nested"
+    single_file = root / "single.txt"
+    batch_text_file = nested / "batch.txt"
+    batch_bytes_file = nested / "batch.bin"
+    text_content = "hello, ROCK filesystem\n"
+    bytes_content = b"\x00\xffrock-bytes"
+
+    assert sandbox.files.make_dir(str(nested), user="root") is True
+    assert sandbox.files.make_dir(str(nested), user="root") is False
+
+    written = sandbox.files.write(str(single_file), text_content)
+    assert written.path == str(single_file)
+    assert written.type is FileType.FILE
+
+    batch_written = sandbox.files.write_files(
+        [
+            {"path": str(batch_text_file), "data": "batch text\n"},
+            {"path": str(batch_bytes_file), "data": bytes_content},
+        ]
+    )
+    assert [entry.path for entry in batch_written] == [str(batch_text_file), str(batch_bytes_file)]
+    assert [entry.type for entry in batch_written] == [FileType.FILE, FileType.FILE]
+
+    assert sandbox.files.read(str(single_file), format="text") == text_content
+    assert sandbox.files.read(str(batch_bytes_file), format="bytes") == bytearray(bytes_content)
+
+    shallow_paths = {Path(entry.path).relative_to(root).as_posix() for entry in sandbox.files.list(str(root))}
+    assert shallow_paths == {"nested", "single.txt"}
+
+    deep_entries = {
+        Path(entry.path).relative_to(root).as_posix(): entry for entry in sandbox.files.list(str(root), depth=2)
+    }
+    assert set(deep_entries) == {"nested", "nested/batch.bin", "nested/batch.txt", "single.txt"}
+    assert deep_entries["nested"].type is FileType.DIR
+    assert deep_entries["nested/batch.bin"].type is FileType.FILE
+
+    file_info = sandbox.files.get_info(str(batch_bytes_file))
+    assert file_info.path == str(batch_bytes_file)
+    assert file_info.type is FileType.FILE
+    assert file_info.size == len(bytes_content)
+    assert file_info.permissions.startswith("-")
+    assert file_info.modified_time.tzinfo is not None
+
+    directory_info = sandbox.files.get_info(str(nested))
+    assert directory_info.path == str(nested)
+    assert directory_info.type is FileType.DIR
+    assert directory_info.permissions.startswith("d")
+
+    canonical_file = root / "canonical.txt"
+    canonical_written = sandbox.files.write(str(nested / ".." / canonical_file.name), "canonical\n")
+    assert canonical_written.path == str(canonical_file)
+    assert sandbox.files.read(str(canonical_file)) == "canonical\n"
+
+    with pytest.raises(FileNotFoundException):
+        sandbox.files.read(str(root / "missing.txt"))
 
 
 def test_commands_run_nonzero_exit_end_to_end(e2b_command_stack):

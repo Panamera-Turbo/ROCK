@@ -1,3 +1,4 @@
+from datetime import datetime
 from enum import Enum
 from typing import Annotated, Literal
 
@@ -10,6 +11,28 @@ class SandboxResponse(BaseModel):
     code: codes | None = None
     exit_code: int | None = None
     failure_reason: str | None = None
+
+
+class FileEntryType(str, Enum):
+    FILE = "file"
+    DIR = "dir"
+
+
+class FileEntry(BaseModel):
+    name: str
+    type: FileEntryType
+    path: str
+    size: int
+    mode: int
+    permissions: str
+    owner: str
+    group: str
+    modified_time: datetime
+    symlink_target: str | None = None
+
+
+class MakeDirectoryResponse(BaseModel):
+    created: bool
 
 
 class State(str, Enum):

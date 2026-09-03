@@ -356,7 +356,7 @@ class SandboxManager(BaseManager):
             while True:
                 await asyncio.sleep(1)
                 status = await self.get_status(sandbox_id)
-                if status.is_alive:
+                if status.is_alive and status.host_ip:
                     break
                 if time.time() >= deadline:
                     raise TimeoutError(f"sandbox {sandbox_id} not running after {REQUEST_TIMEOUT_SECONDS}s")

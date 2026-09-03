@@ -21,7 +21,9 @@ from rock.actions import (
     CommitErrorCode,
     CommitStatusResponse,
     CreateBashSessionResponse,
+    FileEntry,
     IsAliveResponse,
+    ListDirectoryRequest,
     ReadFileResponse,
     UploadResponse,
     WriteFileResponse,
@@ -254,6 +256,156 @@ class SandboxProxyService:
         files = {"file": (file.filename, file.file, file.content_type)}
         response = await self._send_request(sandbox_id, sandbox_status_dicts[0], "upload", data, None, files, "POST")
         return UploadResponse(**response)
+
+    async def _e2b_fs_json_request(
+        self,
+        sandbox_id: str,
+        sandbox_status: dict,
+        path: str,
+        *,
+        json_data: dict | None = None,
+        data: dict | None = None,
+        files: dict | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> dict | list:
+        host_ip = sandbox_status.get("host_ip")
+        service_status = ServiceStatus.from_dict(sandbox_status)
+        url = f"{self._api_url(host_ip, service_status)}/{path}"
+        try:
+            response = await (client or self._rpc_client).request(
+                method="POST",
+                url=url,
+                headers=self._headers(sandbox_id),
+                json=json_data,
+                data=data,
+                files=files,
+            )
+        except httpx.RequestError as error:
+            raise ConnectionError("sandbox filesystem service is unavailable") from error
+
+        if response.status_code < 400:
+            return response.json()
+
+        try:
+            payload = response.json()
+            message = payload.get("detail") or payload.get("message") or str(payload)
+        except (ValueError, AttributeError):
+            message = response.text
+        if response.status_code == 404:
+            raise FileNotFoundError(message)
+        if response.status_code in (400, 422):
+            raise ValueError(message)
+        if response.status_code in (401, 403):
+            raise PermissionError(message)
+        raise RuntimeError(message)
+
+    async def e2b_fs_make_dir(self, sandbox_id: str, path: str) -> bool:
+        await self._update_expire_time(sandbox_id)
+        sandbox_status = (await self.get_service_status(sandbox_id))[0]
+        response = await self._e2b_fs_json_request(
+            sandbox_id,
+            sandbox_status,
+            "fs/make-dir",
+            json_data={"path": path},
+        )
+        return bool(response["created"])
+
+    async def e2b_fs_list(self, sandbox_id: str, path: str, depth: int) -> list[FileEntry]:
+        await self._update_expire_time(sandbox_id)
+        sandbox_status = (await self.get_service_status(sandbox_id))[0]
+        response = await self._e2b_fs_json_request(
+            sandbox_id,
+            sandbox_status,
+            "fs/list",
+            json_data=ListDirectoryRequest(path=path, depth=depth).model_dump(),
+        )
+        return [FileEntry.model_validate(entry) for entry in response]
+
+    async def e2b_fs_stat(self, sandbox_id: str, path: str) -> FileEntry:
+        await self._update_expire_time(sandbox_id)
+        sandbox_status = (await self.get_service_status(sandbox_id))[0]
+        response = await self._e2b_fs_json_request(
+            sandbox_id,
+            sandbox_status,
+            "fs/stat",
+            json_data={"path": path},
+        )
+        return FileEntry.model_validate(response)
+
+    async def e2b_fs_write_files(
+        self,
+        sandbox_id: str,
+        entries: list[tuple[str, UploadFile]],
+    ) -> list[str]:
+        await self._update_expire_time(sandbox_id)
+        sandbox_status = (await self.get_service_status(sandbox_id))[0]
+        written_paths: list[str] = []
+        for target_path, file in entries:
+            await file.seek(0)
+            await self._e2b_fs_json_request(
+                sandbox_id,
+                sandbox_status,
+                "upload",
+                data={"target_path": target_path, "unzip": "false"},
+                files={"file": (file.filename, file.file, file.content_type)},
+                client=self._proxy_client,
+            )
+            written_paths.append(target_path)
+        return written_paths
+
+    async def e2b_fs_read(self, sandbox_id: str, path: str) -> Response:
+        await self._update_expire_time(sandbox_id)
+        sandbox_status = (await self.get_service_status(sandbox_id))[0]
+        host_ip = sandbox_status.get("host_ip")
+        service_status = ServiceStatus.from_dict(sandbox_status)
+        url = f"{self._api_url(host_ip, service_status)}/fs/read"
+        try:
+            response = await self._proxy_client.send(
+                self._proxy_client.build_request(
+                    method="GET",
+                    url=url,
+                    params={"path": path},
+                    headers=self._headers(sandbox_id),
+                ),
+                stream=True,
+            )
+        except httpx.RequestError as error:
+            raise ConnectionError("sandbox filesystem service is unavailable") from error
+
+        if response.status_code >= 400:
+            try:
+                content = await response.aread()
+                message = response.json().get("detail") or content.decode(errors="replace")
+            finally:
+                await response.aclose()
+            if response.status_code == 404:
+                raise FileNotFoundError(message)
+            if response.status_code in (400, 422):
+                raise ValueError(message)
+            if response.status_code in (401, 403):
+                raise PermissionError(message)
+            raise RuntimeError(message)
+
+        response_headers = {
+            key: value
+            for key, value in response.headers.items()
+            if key.lower() not in {"connection", "transfer-encoding", "content-length", "content-encoding"}
+        }
+
+        async def stream():
+            try:
+                async for chunk in response.aiter_bytes():
+                    if chunk:
+                        yield chunk
+            finally:
+                await response.aclose()
+
+        return StreamingResponse(
+            stream(),
+            status_code=response.status_code,
+            media_type=response.headers.get("content-type", "application/octet-stream"),
+            headers=response_headers,
+        )
 
     @monitor_sandbox_operation()
     async def execute(

@@ -47,6 +47,14 @@ class WriteFileRequest(BaseModel):
     path: str
 
 
+class FilePathRequest(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class ListDirectoryRequest(FilePathRequest):
+    depth: int = Field(default=1, ge=1, le=100)
+
+
 class CloseBashSessionRequest(BaseModel):
     session_type: Literal["bash"] = "bash"
     session: str = "default"

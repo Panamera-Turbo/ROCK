@@ -1,10 +1,7 @@
 import asyncio
-import shutil
-import tempfile
-import zipfile
-from pathlib import Path
 
-from fastapi import APIRouter, File, Form, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 
 from rock.actions import (
     CloseResponse,
@@ -17,6 +14,9 @@ from rock.actions import (
     EnvResetResponse,
     EnvStepRequest,
     EnvStepResponse,
+    FileEntryType,
+    FilePathRequest,
+    ListDirectoryRequest,
     UploadResponse,
 )
 from rock.admin.proto.request import SandboxAction as Action
@@ -27,6 +27,14 @@ from rock.admin.proto.request import SandboxReadFileRequest as ReadFileRequest
 from rock.admin.proto.request import SandboxWriteFileRequest as WriteFileRequest
 from rock.common.port_validation import validate_port_forward_port
 from rock.logger import init_logger
+from rock.rocklet.file_system import (
+    list_directory,
+    make_directory,
+    read_file_chunks,
+    resolve_path,
+    stat_path,
+    store_upload,
+)
 from rock.rocklet.rocklet import Rocklet
 from rock.utils import get_executor
 
@@ -43,6 +51,16 @@ rocklet = Rocklet.create(executor=get_executor())
 
 def serialize_model(model):
     return model.model_dump() if hasattr(model, "model_dump") else model.dict()
+
+
+def _raise_filesystem_http_error(error: Exception) -> None:
+    if isinstance(error, FileNotFoundError):
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    if isinstance(error, PermissionError):
+        raise HTTPException(status_code=403, detail=str(error)) from error
+    if isinstance(error, (IsADirectoryError, NotADirectoryError, ValueError)):
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    raise error
 
 
 @local_router.get("/is_alive")
@@ -85,29 +103,60 @@ async def write_file(request: WriteFileRequest):
     return serialize_model(await rocklet.write_file(request))
 
 
+@local_router.post("/fs/make-dir")
+async def make_fs_directory(request: FilePathRequest):
+    try:
+        return serialize_model(await make_directory(request))
+    except Exception as error:
+        _raise_filesystem_http_error(error)
+
+
+@local_router.post("/fs/list")
+async def list_fs_directory(request: ListDirectoryRequest):
+    try:
+        return [serialize_model(entry) for entry in await list_directory(request)]
+    except Exception as error:
+        _raise_filesystem_http_error(error)
+
+
+@local_router.post("/fs/stat")
+async def stat_fs_path(request: FilePathRequest):
+    try:
+        return serialize_model(await stat_path(request))
+    except Exception as error:
+        _raise_filesystem_http_error(error)
+
+
+@local_router.get("/fs/read")
+async def read_fs_file(path: str):
+    request = FilePathRequest(path=path)
+    try:
+        entry = await stat_path(request)
+        if entry.type == FileEntryType.DIR:
+            raise IsADirectoryError(path)
+    except Exception as error:
+        _raise_filesystem_http_error(error)
+    return StreamingResponse(
+        read_file_chunks(request),
+        media_type="application/octet-stream",
+    )
+
+
 @local_router.post("/upload")
 async def upload(
     file: UploadFile = File(...),
     target_path: str = Form(...),  # type: ignore
     unzip: bool = Form(False),
 ):
-    target_path: Path = Path(target_path)
-    target_path.parent.mkdir(parents=True, exist_ok=True)
-    # First save the file to a temporary directory and potentially unzip it.
-    with tempfile.TemporaryDirectory() as temp_dir:
-        file_path = Path(temp_dir) / "temp_file_transfer"
+    destination = resolve_path(target_path)
+    try:
         try:
-            with open(file_path, "wb") as f:
-                f.write(await file.read())
-        finally:
-            await file.close()
-        if unzip:
-            with zipfile.ZipFile(file_path, "r") as zip_ref:
-                zip_ref.extractall(target_path)
-            file_path.unlink()
-        else:
-            shutil.move(file_path, target_path)
-    return UploadResponse(success=True, file_name=target_path.name)
+            await asyncio.to_thread(store_upload, file.file, destination, unzip)
+        except Exception as error:
+            _raise_filesystem_http_error(error)
+    finally:
+        await file.close()
+    return UploadResponse(success=True, file_name=destination.name)
 
 
 @local_router.post("/close")

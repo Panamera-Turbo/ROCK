@@ -2,9 +2,10 @@ import logging
 import os
 import time
 import uuid
+from pathlib import PurePosixPath
 
 import pytest
-from e2b import Sandbox, SandboxQuery, SandboxState
+from e2b import FileType, Sandbox, SandboxQuery, SandboxState
 
 pytestmark = [pytest.mark.integration]
 
@@ -81,6 +82,7 @@ def test_e2b_sdk_commands_run_across_write_and_read_domains(
         template=TEMPLATE_ID,
         timeout=300,
         metadata={
+            "ap-job-id": request_id,
             "e2b.agents.kruise.io/skip-init-runtime": "true",
             "e2b.agents.kruise.io/create-on-no-stock": "true",
             "e2b.agents.kruise.io/claim-timeout-seconds": "60",
@@ -112,3 +114,49 @@ def test_e2b_sdk_commands_run_across_write_and_read_domains(
     assert result.exit_code == 0
     assert result.stdout == "rock-e2b:123:ok\n"
     assert result.stderr == "rock-e2b-stderr\n"
+
+    files_root = PurePosixPath("/tmp") / request_id
+    nested_dir = files_root / "nested"
+    text_file = files_root / "single.txt"
+    batch_text_file = nested_dir / "batch.txt"
+    batch_bytes_file = nested_dir / "batch.bin"
+    text_content = "hello from ROCK live filesystem\n"
+    bytes_content = b"\x00\xffrock-live-bytes"
+
+    assert sandbox.files.make_dir(str(nested_dir)) is True
+    assert sandbox.files.make_dir(str(nested_dir)) is False
+
+    written = sandbox.files.write(str(text_file), text_content)
+    assert written.path == str(text_file)
+    assert written.type is FileType.FILE
+
+    batch_written = sandbox.files.write_files(
+        [
+            {"path": str(batch_text_file), "data": "batch text\n"},
+            {"path": str(batch_bytes_file), "data": bytes_content},
+        ]
+    )
+    assert [entry.path for entry in batch_written] == [str(batch_text_file), str(batch_bytes_file)]
+    assert all(entry.type is FileType.FILE for entry in batch_written)
+
+    assert sandbox.files.read(str(text_file), format="text") == text_content
+    assert sandbox.files.read(str(batch_bytes_file), format="bytes") == bytearray(bytes_content)
+
+    entries = {entry.path: entry for entry in sandbox.files.list(str(files_root), depth=2)}
+    assert set(entries) == {
+        str(nested_dir),
+        str(text_file),
+        str(batch_text_file),
+        str(batch_bytes_file),
+    }
+    assert entries[str(nested_dir)].type is FileType.DIR
+    assert entries[str(batch_bytes_file)].type is FileType.FILE
+
+    file_info = sandbox.files.get_info(str(batch_bytes_file))
+    assert file_info.path == str(batch_bytes_file)
+    assert file_info.type is FileType.FILE
+    assert file_info.size == len(bytes_content)
+
+    directory_info = sandbox.files.get_info(str(nested_dir))
+    assert directory_info.path == str(nested_dir)
+    assert directory_info.type is FileType.DIR

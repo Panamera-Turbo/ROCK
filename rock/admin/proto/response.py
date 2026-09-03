@@ -1,8 +1,10 @@
+from datetime import timezone
+from pathlib import PurePosixPath
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from rock.actions import SandboxResponse
+from rock.actions import FileEntry, FileEntryType, SandboxResponse
 from rock.actions.sandbox.response import State, StateTransitionRecord
 from rock.actions.sandbox.sandbox_info import SandboxInfo
 from rock.admin.proto.request import TaskSetSpec
@@ -29,6 +31,67 @@ class E2BConnectEndResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     error: E2BConnectErrorPayload | None = None
+
+
+class E2BFileEntryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True)
+
+    name: str
+    type: Literal["FILE_TYPE_FILE", "FILE_TYPE_DIRECTORY", "FILE_TYPE_UNSPECIFIED"]
+    path: str
+    size: str
+    mode: int
+    permissions: str
+    owner: str
+    group: str
+    modified_time: str = Field(alias="modifiedTime")
+    symlink_target: str | None = Field(default=None, alias="symlinkTarget")
+
+    @classmethod
+    def from_file_entry(cls, entry: FileEntry) -> "E2BFileEntryResponse":
+        entry_type = {
+            FileEntryType.FILE: "FILE_TYPE_FILE",
+            FileEntryType.DIR: "FILE_TYPE_DIRECTORY",
+        }.get(entry.type, "FILE_TYPE_UNSPECIFIED")
+        modified_time = entry.modified_time
+        if modified_time.tzinfo is None:
+            modified_time = modified_time.replace(tzinfo=timezone.utc)
+        return cls(
+            name=entry.name,
+            type=entry_type,
+            path=entry.path,
+            size=str(entry.size),
+            mode=entry.mode,
+            permissions=entry.permissions,
+            owner=entry.owner,
+            group=entry.group,
+            modifiedTime=modified_time.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+            symlinkTarget=entry.symlink_target,
+        )
+
+
+class E2BListDirResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    entries: list[E2BFileEntryResponse]
+
+
+class E2BStatResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    entry: E2BFileEntryResponse
+
+
+class E2BWrittenFileResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str
+    type: Literal["file"] = "file"
+    path: str
+
+    @classmethod
+    def from_path(cls, path: str) -> "E2BWrittenFileResponse":
+        return cls(name=PurePosixPath(path).name, path=path)
 
 
 class E2BProcessStartEvent(BaseModel):

@@ -1,10 +1,14 @@
 import asyncio
 import base64
+import posixpath
 import re
 from collections.abc import AsyncIterator
+from pathlib import PurePosixPath
 from urllib.parse import parse_qsl, unquote
 
-from rock.actions import CommandResponse
+from fastapi import Response, UploadFile
+
+from rock.actions import CommandResponse, FileEntry
 from rock.actions.sandbox.response import State
 from rock.admin.proto.e2b_connect import encode_connect_end, encode_connect_message
 from rock.admin.proto.request import SandboxCommand
@@ -19,11 +23,23 @@ from rock.logger import init_logger
 from rock.sandbox.sandbox_meta_store import SandboxMetaStore
 from rock.sandbox.service.sandbox_proxy_service import SandboxProxyService
 from rock.sandbox.utils.timeout import SandboxTimeoutHelper
-from rock.sdk.common.exceptions import BadRequestRockError, SandboxNotFoundRockError
+from rock.sdk.common.exceptions import BadRequestRockError, E2BConnectError, SandboxNotFoundRockError
 
 _INVALID_PERCENT_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 PROCESS_REGISTRY_LIMIT = 1024
+_E2B_DEFAULT_HOME = PurePosixPath("/home/user")
 logger = init_logger(__name__)
+
+
+def _normalize_e2b_path(path: str) -> str:
+    if path == "~":
+        return str(_E2B_DEFAULT_HOME)
+    if path.startswith("~/"):
+        path = path[2:]
+    normalized = PurePosixPath(path)
+    if not normalized.is_absolute():
+        normalized = _E2B_DEFAULT_HOME / normalized
+    return posixpath.normpath(str(normalized))
 
 
 class E2BProxyService:
@@ -50,6 +66,35 @@ class E2BProxyService:
     async def is_running(self, sandbox_id: str) -> bool:
         state = await self._sandbox_state(sandbox_id)
         return state == State.RUNNING or state == State.RUNNING.value
+
+    def _filesystem_manager(self) -> SandboxProxyService:
+        if self._sandbox_manager is None:
+            raise RuntimeError("E2B sandbox manager is not configured")
+        return self._sandbox_manager
+
+    async def e2b_fs_make_dir(self, sandbox_id: str, path: str) -> bool:
+        normalized_path = _normalize_e2b_path(path)
+        created = await self._filesystem_manager().e2b_fs_make_dir(sandbox_id, normalized_path)
+        if not created:
+            raise E2BConnectError("already_exists", f"directory already exists: {normalized_path}")
+        return True
+
+    async def e2b_fs_list(self, sandbox_id: str, path: str, depth: int) -> list[FileEntry]:
+        return await self._filesystem_manager().e2b_fs_list(sandbox_id, _normalize_e2b_path(path), depth)
+
+    async def e2b_fs_stat(self, sandbox_id: str, path: str) -> FileEntry:
+        return await self._filesystem_manager().e2b_fs_stat(sandbox_id, _normalize_e2b_path(path))
+
+    async def e2b_fs_write_files(
+        self,
+        sandbox_id: str,
+        entries: list[tuple[str, UploadFile]],
+    ) -> list[str]:
+        normalized_entries = [(_normalize_e2b_path(path), file) for path, file in entries]
+        return await self._filesystem_manager().e2b_fs_write_files(sandbox_id, normalized_entries)
+
+    async def e2b_fs_read(self, sandbox_id: str, path: str) -> Response:
+        return await self._filesystem_manager().e2b_fs_read(sandbox_id, _normalize_e2b_path(path))
 
     async def start_process(
         self,

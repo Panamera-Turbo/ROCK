@@ -29,6 +29,20 @@ class E2BCreateSandboxRequest(BaseModel):
     auto_resume: dict[str, Any] | None = Field(default=None, alias="autoResume")
 
 
+class E2BFilePathRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    path: str = Field(min_length=1)
+
+
+class E2BListDirRequest(E2BFilePathRequest):
+    depth: int = Field(default=0, ge=0, le=100)
+
+    @property
+    def effective_depth(self) -> int:
+        return self.depth or 1
+
+
 class E2BProcessConfig(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 

@@ -3,6 +3,8 @@
 > 调研快照：2026-08-21
 > 范围：E2B Python/JS SDK 调用 `sandbox.commands.run()` 时实际使用的数据面协议，以及 ROCK 的最小兼容方案。
 > 不在范围：本文件不设计完整 E2B filesystem、PTY、snapshot、pause/resume 等兼容面，也不修改产品代码。
+>
+> **后续更新（2026-09-01）**：本文件的 `envdVersion=0.3.0` 是当时仅实现 `commands.run()` 的阶段性决策，不再是后续 filesystem 兼容工作的固定上限。files 全参数能力与更高版本的 gate 见 [e2b-files-python-protocol.md](./e2b-files-python-protocol.md)；提高全局版本前仍须同时审计 commands/watch 等被同一版本值解锁的能力。
 
 ## 1. 结论先行
 
@@ -360,7 +362,7 @@ SDK 映射来自 [Python RPC error map](https://github.com/e2b-dev/E2B/blob/5995
 
 本期返回 `0.3.0`。原因是官方 SDK在调用方显式传 `stdin=False` 且版本 `<0.3.0` 时，会在客户端直接拒绝调用；ROCK adapter 已接受并丢弃 `stdin:false`，因此可以准确声明这项能力。`stdin:true`、SendInput、CloseStdin 和 PTY 仍不支持并返回 `unimplemented`。
 
-不要继续提高到 `0.4.0+`：更高版本会启用默认用户、close-stdin、filesystem upload/metadata 等尚未实现的 feature gate。feature gate 常量见 [Python envd versions](https://github.com/e2b-dev/E2B/blob/5995e0ad1cb7b2fba9ce7c5ae2c0acb3c86d46a5/packages/python-sdk/e2b/envd/versions.py#L1-L12)。create、get、list 返回的版本必须保持一致。
+在本文件对应的 `commands.run()` 阶段不提高到 `0.4.0+`：更高版本会启用默认用户、close-stdin、filesystem upload/metadata 等当时尚未实现的 feature gate。后续 filesystem 工作可以提高版本，但必须先兑现目标版本打开的 files 能力，并同步审计 commands/watch 的全局 gate。feature gate 常量见 [Python envd versions](https://github.com/e2b-dev/E2B/blob/5995e0ad1cb7b2fba9ce7c5ae2c0acb3c86d46a5/packages/python-sdk/e2b/envd/versions.py#L1-L12)。create、get、list 返回的版本必须保持一致。
 
 ## 9. ROCK 落地方案
 

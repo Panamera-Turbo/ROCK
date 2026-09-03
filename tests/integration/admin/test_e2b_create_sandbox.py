@@ -6,7 +6,7 @@ from ap_sandbox import SandboxConfig, SandboxManager
 from httpx import Client
 
 TEMPLATE_ID = "st_5efa0210685646998525"
-TEST_METADATA = {"ap-job-id": "e2e-sandbox-lifecycle-test"}
+TEST_METADATA = {"job-id": "e2e-sandbox-lifecycle-test"}
 
 
 @pytest.mark.integration
@@ -53,11 +53,11 @@ def test_create_and_delete_sandbox_with_ap_sandbox_sdk(caplog: pytest.LogCapture
 
             detail = sandbox.get_info(**api_options)
             assert detail.sandbox_id == sandbox_id
-            assert detail.metadata["ap-job-id"] == TEST_METADATA["ap-job-id"]
+            assert detail.metadata["job-id"] == TEST_METADATA["job-id"]
 
             list_response = client.get(
                 "/v2/sandboxes",
-                params={"metadata": f"ap-job-id:{TEST_METADATA['ap-job-id']}"},
+                params={"metadata": f"job-id:{TEST_METADATA['job-id']}"},
             )
             list_response.raise_for_status()
             assert sandbox_id in {item["sandboxID"] for item in list_response.json()}
