@@ -32,6 +32,7 @@ route satisfies the call but the call is not in live acceptance. **Partial** mea
 | Lifecycle | `Sandbox.list()` | Partial | Requires a non-empty metadata filter, returns running sandboxes only, and returns one unpaginated result set. |
 | Lifecycle | `sandbox.kill()` / `Sandbox.kill(id)` | Supported | Irreversibly deletes the sandbox; returns `False` when it no longer exists. |
 | Lifecycle | `sandbox.is_running()` | Protocol-compatible | `/health` returns `True` only while the ROCK state is `RUNNING`. |
+| Lifecycle | `sandbox.set_timeout()` / `Sandbox.set_timeout(id, ...)` | Partial | Resets a running sandbox's existing ROCK auto-clear timeout. Seconds are rounded up to whole minutes, and regular command/file activity keeps ROCK's sliding renewal behavior. |
 | Commands | `sandbox.commands.run()` in the foreground | Supported | Non-interactive only; returns stdout, stderr, and exit code and supports environment, working directory, and a finite timeout. |
 | Commands | `sandbox.commands.run(background=True)` | Partial | The returned handle can wait on the original response stream; it cannot kill or reconnect to the process. |
 | Commands | `CommandHandle.disconnect()` | Partial | Closes the response stream without killing the command; reconnecting to that command is not supported. |
@@ -69,6 +70,7 @@ The external gateway must route paths as follows:
 |---|---|---|
 | `E2B_API_URL` | `POST /sandboxes` | Admin role (`ROCK_ADMIN_ROLE=admin`) |
 | `E2B_API_URL` | `GET`, `DELETE /sandboxes/{sandboxID}` | Admin role |
+| `E2B_API_URL` | `POST /sandboxes/{sandboxID}/timeout` | Admin role |
 | `E2B_API_URL` | `GET /v2/sandboxes` | Proxy role, even though the SDK sends this list request to `api_url` |
 | `E2B_SANDBOX_URL` | `/health`, `/process.Process/Start`, `/files`, `/filesystem.Filesystem/*` | Proxy role |
 
@@ -176,9 +178,22 @@ returns `False`.
 archived, deleted, and missing sandboxes return `False`. This method is protocol-compatible but not part of the
 current live SDK acceptance test.
 
+### Set timeout
+
+`sandbox.set_timeout(timeout)` and the static `Sandbox.set_timeout(id, timeout, ...)` form are supported for a
+`RUNNING` sandbox. `timeout` is a strict integer number of seconds in the E2B `int32` range. ROCK maps it onto the
+existing minute-based auto-clear model by rounding up to whole minutes; `0` marks the deadline immediately due.
+Success is an empty HTTP 204 response, which the Python SDK exposes as `None`. Missing sandboxes return the E2B
+`{code, message}` 404 shape.
+
+E2B control-plane status checks used by `get_info()`, `set_timeout()`, and `kill()` do not refresh the timeout.
+All other ROCK timeout behavior remains unchanged: command/file activity may renew the sliding auto-clear deadline,
+the periodic lifecycle scan may introduce delay, and expiration stops the sandbox instead of guaranteeing E2B's
+default irreversible kill.
+
 ### Unsupported lifecycle APIs
 
-ROCK exposes no compatible routes for `Sandbox.connect()`/resume, `pause()`/`beta_pause()`, `set_timeout()`, `fork()`,
+ROCK exposes no compatible routes for `Sandbox.connect()`/resume, `pause()`/`beta_pause()`, `fork()`,
 `update_network()`, `get_metrics()`, snapshot operations, or E2B template management.
 
 ROCK also does not provide the E2B wildcard-host traffic contract used by `sandbox.get_host()`, or the E2B signature

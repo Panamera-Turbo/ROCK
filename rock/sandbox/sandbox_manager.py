@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import math
 import time
 import zoneinfo
 from datetime import timezone
@@ -46,7 +47,7 @@ from rock.sandbox.sandbox_statemachine import (
 )
 from rock.sandbox.service.factory import create_sandbox_proxy_service
 from rock.sandbox.utils.timeout import SandboxTimeoutHelper
-from rock.sdk.common.exceptions import BadRequestRockError
+from rock.sdk.common.exceptions import BadRequestRockError, SandboxNotFoundRockError
 from rock.utils import REQUEST_TIMEOUT_SECONDS, StageTimer
 from rock.utils.crypto_utils import AESEncryption
 from rock.utils.format import convert_to_gb, parse_size_to_bytes
@@ -486,7 +487,12 @@ class SandboxManager(BaseManager):
         return operator_sandbox_info
 
     @monitor_sandbox_operation()
-    async def get_status(self, sandbox_id, include_all_states: bool = False) -> SandboxStatusResponse:
+    async def get_status(
+        self,
+        sandbox_id,
+        include_all_states: bool = False,
+        refresh_timeout: bool = True,
+    ) -> SandboxStatusResponse:
         sandbox_info = await self._meta_store.get(sandbox_id, check_db=True)
         if sandbox_info is None:
             raise BadRequestRockError(f"Sandbox {sandbox_id} not found")
@@ -515,7 +521,7 @@ class SandboxManager(BaseManager):
             ):
                 await self._meta_store.update_host_ip_if_missing(sandbox_id, operator_host_ip)
 
-            if operator_sandbox_info.get("state") in (State.PENDING, State.RUNNING):
+            if refresh_timeout and operator_sandbox_info.get("state") in (State.PENDING, State.RUNNING):
                 await self._refresh_timeout(sandbox_id)
 
         if state == State.ARCHIVING:
@@ -609,6 +615,22 @@ class SandboxManager(BaseManager):
     @monitor_sandbox_operation()
     async def upload(self, file: UploadFile, target_path: str, sandbox_id: str) -> UploadResponse:
         return await self._proxy_service.upload(file, target_path, sandbox_id)
+
+    async def set_timeout(self, sandbox_id: str, timeout_seconds: int) -> None:
+        try:
+            status = await self.get_status(
+                sandbox_id,
+                include_all_states=True,
+                refresh_timeout=False,
+            )
+        except BadRequestRockError:
+            raise SandboxNotFoundRockError(f"Sandbox {sandbox_id} not found") from None
+        if status.state != State.RUNNING:
+            raise BadRequestRockError(f"Sandbox {sandbox_id} is not running")
+        await self._meta_store.update_timeout(
+            sandbox_id,
+            SandboxTimeoutHelper.make_timeout_info(math.ceil(timeout_seconds / 60)),
+        )
 
     async def _refresh_timeout(self, sandbox_id: str) -> None:
         timeout_info = await self._meta_store.get_timeout(sandbox_id)

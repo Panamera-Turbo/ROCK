@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.routing import APIRoute
 
 from rock.actions.sandbox.response import State
-from rock.admin.proto.request import E2BCreateSandboxRequest, StartHeaders
+from rock.admin.proto.request import E2BCreateSandboxRequest, E2BSetSandboxTimeoutRequest, StartHeaders
 from rock.admin.proto.response import E2BCreateSandboxResponse, E2BSandboxInfo
 from rock.admin.service.e2b_service import E2BService
 from rock.common.constants import AP_SANDBOX_ID_METADATA_KEY, E2B_CLIENT_ID, E2B_ENVD_VERSION
@@ -102,6 +102,15 @@ async def create_sandbox(
 )
 async def get_sandbox(sandbox_id: Annotated[NonBlankStr, Path(alias="sandboxID")]) -> E2BSandboxInfo:
     return await e2b_service.get_sandbox(sandbox_id)
+
+
+@e2b_router.post("/sandboxes/{sandboxID}/timeout", status_code=204, response_class=Response)
+async def set_sandbox_timeout(
+    request: E2BSetSandboxTimeoutRequest,
+    sandbox_id: Annotated[NonBlankStr, Path(alias="sandboxID")],
+) -> Response:
+    await e2b_service.set_timeout(sandbox_id, request.timeout)
+    return Response(status_code=204)
 
 
 @e2b_router.delete("/sandboxes/{sandboxID}", status_code=204, response_class=Response)

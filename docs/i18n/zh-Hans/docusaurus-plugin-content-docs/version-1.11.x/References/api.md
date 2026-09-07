@@ -36,6 +36,7 @@ ROCK平台提供两种核心API服务：
 
 5. **Get Sandbox Status** - 获取沙箱详细状态
    - 获取沙箱的完整状态信息
+   - Admin 接口 `GET /apis/envs/sandbox/v1/get_status` 支持可选布尔 Query 参数 `refresh_timeout`，默认 `true`。使用 `?sandbox_id=sandbox-12345&refresh_timeout=false` 可查询状态而不续时。
 
 6. **Stop Sandbox** - 停止沙箱环境
    - 安全关闭沙箱实例

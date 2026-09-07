@@ -36,6 +36,7 @@ Full lifecycle management functions for sandbox environments:
 
 5. **Get Sandbox Status** - Get detailed sandbox status
    - Get complete status information of the sandbox
+   - The Admin endpoint `GET /apis/envs/sandbox/v1/get_status` accepts an optional boolean query parameter `refresh_timeout` (default: `true`). Use `?sandbox_id=sandbox-12345&refresh_timeout=false` to query without renewing the timeout.
 
 6. **Stop Sandbox** - Stop sandbox environment
    - Safely shut down the sandbox instance

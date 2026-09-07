@@ -83,8 +83,16 @@ async def get_sandbox_statistics(sandbox_id: NonBlankStr):
 
 @sandbox_router.get("/get_status")
 @handle_exceptions(error_message="get sandbox status failed")
-async def get_status(sandbox_id: NonBlankStr, include_all_states: bool = False):
-    return RockResponse(result=await sandbox_manager.get_status(sandbox_id, include_all_states=include_all_states))
+async def get_status(
+    sandbox_id: NonBlankStr,
+    include_all_states: bool = False,
+    refresh_timeout: bool = True,
+):
+    return RockResponse(
+        result=await sandbox_manager.get_status(
+            sandbox_id, include_all_states=include_all_states, refresh_timeout=refresh_timeout
+        )
+    )
 
 
 @sandbox_router.post("/execute")

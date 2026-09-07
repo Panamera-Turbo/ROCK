@@ -103,6 +103,7 @@ def test_e2b_sdk_commands_run_across_write_and_read_domains(
     info = sandbox.get_info()
     assert info.sandbox_id == sandbox.sandbox_id
     assert info.state == SandboxState.RUNNING
+    assert sandbox.set_timeout(300) is None
 
     result = sandbox.commands.run(
         'printf "rock-e2b:%s:%s\\n" "$a" "$COMMAND_ENV"; printf "rock-e2b-stderr\\n" >&2',

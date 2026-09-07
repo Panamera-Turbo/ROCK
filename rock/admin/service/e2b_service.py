@@ -6,7 +6,7 @@ from rock.deployments.config import DockerDeploymentConfig
 from rock.logger import init_logger
 from rock.sandbox.operator.remote.constants import EXT_USE_RAW, EXT_USE_RAW_ENABLED
 from rock.sandbox.sandbox_manager import SandboxManager
-from rock.sdk.common.exceptions import BadRequestRockError, E2BSandboxNotFoundError
+from rock.sdk.common.exceptions import BadRequestRockError, E2BSandboxNotFoundError, SandboxNotFoundRockError
 from rock.utils.format import megabytes_to_size
 
 logger = init_logger(__name__)
@@ -53,13 +53,31 @@ class E2BService:
 
     async def get_sandbox(self, sandbox_id: str) -> E2BSandboxInfo:
         try:
-            status = await self._sandbox_manager.get_status(sandbox_id, include_all_states=True)
+            status = await self._sandbox_manager.get_status(
+                sandbox_id,
+                include_all_states=True,
+                refresh_timeout=False,
+            )
         except BadRequestRockError as error:
             raise E2BSandboxNotFoundError(str(error)) from None
         return E2BSandboxInfo(**e2b_sandbox_info_fields(sandbox_id, status))
 
-    async def get_status(self, sandbox_id: str, include_all_states: bool = False) -> SandboxStatusResponse:
-        return await self._sandbox_manager.get_status(sandbox_id, include_all_states=include_all_states)
+    async def get_status(
+        self,
+        sandbox_id: str,
+        include_all_states: bool = False,
+    ) -> SandboxStatusResponse:
+        return await self._sandbox_manager.get_status(
+            sandbox_id,
+            include_all_states=include_all_states,
+            refresh_timeout=False,
+        )
+
+    async def set_timeout(self, sandbox_id: str, timeout_seconds: int) -> None:
+        try:
+            await self._sandbox_manager.set_timeout(sandbox_id, timeout_seconds)
+        except SandboxNotFoundRockError as error:
+            raise E2BSandboxNotFoundError(str(error)) from None
 
     async def stop(self, sandbox_id: str) -> None:
         await self._sandbox_manager.stop(sandbox_id)

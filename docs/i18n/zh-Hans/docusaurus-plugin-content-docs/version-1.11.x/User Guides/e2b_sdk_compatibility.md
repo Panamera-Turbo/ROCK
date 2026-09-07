@@ -25,6 +25,7 @@ ROCK 针对官方 E2B Python SDK 的特定子集提供了兼容层。现有 E2B 
 | 生命周期 | `Sandbox.list()` | 部分支持 | 要求非空的 `metadata` 过滤条件，仅返回运行中的沙箱，并返回一组未分页的结果。 |
 | 生命周期 | `sandbox.kill()` / `Sandbox.kill(id)` | 支持 | 不可逆地删除沙箱；沙箱已不存在时返回 `False`。 |
 | 生命周期 | `sandbox.is_running()` | 协议兼容 | 仅当 ROCK 状态为 `RUNNING` 时，`/health` 才返回 `True`。 |
+| 生命周期 | `sandbox.set_timeout()` / `Sandbox.set_timeout(id, ...)` | 部分支持 | 重置运行中沙箱现有的 ROCK 自动清理超时。秒数向上取整到整分钟，常规命令/文件活动仍沿用 ROCK 滑动续时。 |
 | 命令 | 前台运行 `sandbox.commands.run()` | 支持 | 仅支持非交互式调用；返回 stdout、stderr 和退出码，并支持环境变量、工作目录和有限的超时时间。 |
 | 命令 | `sandbox.commands.run(background=True)` | 部分支持 | 返回的句柄可以等待原始响应流；无法终止进程或重新连接进程。 |
 | 命令 | `CommandHandle.disconnect()` | 部分支持 | 关闭响应流但不终止命令；不支持重新连接该命令。 |
@@ -60,6 +61,7 @@ export E2B_TEMPLATE_ID="<rock-template-id-or-image>"
 |---|---|---|
 | `E2B_API_URL` | `POST /sandboxes` | Admin 角色（`ROCK_ADMIN_ROLE=admin`） |
 | `E2B_API_URL` | `GET`, `DELETE /sandboxes/{sandboxID}` | Admin 角色 |
+| `E2B_API_URL` | `POST /sandboxes/{sandboxID}/timeout` | Admin 角色 |
 | `E2B_API_URL` | `GET /v2/sandboxes` | Proxy 角色，尽管 SDK 会将此列表请求发送到 `api_url` |
 | `E2B_SANDBOX_URL` | `/health`, `/process.Process/Start`, `/files`, `/filesystem.Filesystem/*` | Proxy 角色 |
 
@@ -143,9 +145,20 @@ ROCK 仅支持 `Sandbox.list(query=SandboxQuery(metadata={...}))`，且有以下
 
 `sandbox.is_running()` 调用数据面的 `/health` 路由。仅当状态为 `RUNNING` 时返回 `True`；处于 `PENDING`、`STOPPED`、`ARCHIVED`、`DELETED` 状态或缺失的沙箱返回 `False`。此方法协议兼容，但不属于当前线上 SDK 验收测试。
 
+### 设置超时
+
+对于 `RUNNING` 沙箱，支持 `sandbox.set_timeout(timeout)` 以及静态形式 `Sandbox.set_timeout(id, timeout, ...)`。
+`timeout` 必须是 E2B `int32` 范围内的严格整数秒数。ROCK 将其映射到现有分钟级自动清理模型，并向上取整到
+整分钟；`0` 表示截止时间立即到期。成功响应为空 HTTP 204，Python SDK 返回 `None`；沙箱不存在时返回 E2B
+`{code, message}` 格式的 404。
+
+`get_info()`、`set_timeout()` 和 `kill()` 使用的 E2B 控制面状态检查不会刷新超时。其他 ROCK timeout 行为保持
+不变：命令/文件活动仍可能刷新滑动式自动清理截止时间，周期性生命周期扫描可能带来延迟，并且过期会停止
+沙箱，而不保证 E2B 默认的不可逆 kill。
+
 ### 不支持的生命周期 API
 
-ROCK 没有为 `Sandbox.connect()`（恢复）、`pause()`/`beta_pause()`、`set_timeout()`、`fork()`、`update_network()`、`get_metrics()`、快照操作或 E2B 模板管理提供兼容路由。
+ROCK 没有为 `Sandbox.connect()`（恢复）、`pause()`/`beta_pause()`、`fork()`、`update_network()`、`get_metrics()`、快照操作或 E2B 模板管理提供兼容路由。
 
 ROCK 也不提供 `sandbox.get_host()` 所使用的 E2B 通配符主机流量约定，也不提供 `upload_url()` 和 `download_url()` 所需的 E2B 签名校验。请使用常规受支持的 `files.*` 方法传输文件，并通过 ROCK [沙箱代理](./sandbox_proxy.md)访问沙箱中对外提供的服务。
 

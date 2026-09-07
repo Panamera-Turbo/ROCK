@@ -72,6 +72,7 @@ class TestGetStatusIncludeAllStates:
         assert isinstance(result, SandboxStatusResponse)
         assert result.state == State.RUNNING
         assert result.is_alive is True
+        sandbox_manager._refresh_timeout.assert_awaited_once_with("sandbox-1")
 
     @pytest.mark.asyncio
     async def test_running_state_triggers_meta_store_update(self, sandbox_manager, mock_operator, mock_meta_store):

@@ -289,7 +289,7 @@ async def test_get_sandbox_returns_e2b_detail_from_manager_status(e2b_app):
         "startedAt": "2026-01-01T07:00:00+08:00",
         "endAt": "2026-01-01T08:00:00+08:00",
     }
-    manager.get_status.assert_awaited_once_with("sandbox-123", include_all_states=True)
+    manager.get_status.assert_awaited_once_with("sandbox-123", include_all_states=True, refresh_timeout=False)
 
 
 @pytest.mark.asyncio
@@ -340,7 +340,7 @@ async def test_delete_running_sandbox_returns_empty_204(e2b_app):
 
     assert response.status_code == 204
     assert response.content == b""
-    manager.get_status.assert_awaited_once_with("sandbox-123", include_all_states=True)
+    manager.get_status.assert_awaited_once_with("sandbox-123", include_all_states=True, refresh_timeout=False)
     manager.stop.assert_awaited_once_with("sandbox-123")
     manager.delete.assert_awaited_once_with("sandbox-123")
 

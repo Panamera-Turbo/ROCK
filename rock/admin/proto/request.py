@@ -29,6 +29,12 @@ class E2BCreateSandboxRequest(BaseModel):
     auto_resume: dict[str, Any] | None = Field(default=None, alias="autoResume")
 
 
+class E2BSetSandboxTimeoutRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    timeout: int = Field(ge=0, le=2_147_483_647)
+
+
 class E2BFilePathRequest(BaseModel):
     model_config = ConfigDict(extra="ignore", strict=True)
 
