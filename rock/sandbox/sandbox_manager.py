@@ -154,12 +154,18 @@ class SandboxManager(BaseManager):
         cluster_info: ClusterInfo = {},
         *,
         use_template_resource_spec: bool = False,
+        apply_image_mirror: bool = True,
     ) -> SandboxStartResponse:
         await self._check_sandbox_exists_in_redis(config)
 
         if isinstance(config, DockerDeploymentConfig):
             await self.rock_config.update()
-            await apply_start_config(self.rock_config, config, user_info.get("rock_authorization"))
+            await apply_start_config(
+                self.rock_config,
+                config,
+                user_info.get("rock_authorization"),
+                apply_image_mirror=apply_image_mirror,
+            )
 
         with StageTimer("startup_timing", f"[{config.image}] Init config", logger):
             if isinstance(config, DockerDeploymentConfig):
@@ -329,12 +335,16 @@ class SandboxManager(BaseManager):
         config: DeploymentConfig,
         user_info: UserInfo = {},
         cluster_info: ClusterInfo = {},
+        *,
+        wait_timeout: float | None = None,
     ) -> SandboxStartResponse:
         return await self._start_and_wait(
             config,
             user_info=user_info,
             cluster_info=cluster_info,
             use_template_resource_spec=True,
+            apply_image_mirror=False,
+            wait_timeout=wait_timeout,
         )
 
     async def _start_and_wait(
@@ -344,23 +354,31 @@ class SandboxManager(BaseManager):
         cluster_info: ClusterInfo,
         *,
         use_template_resource_spec: bool = False,
+        wait_timeout: float | None = None,
+        apply_image_mirror: bool = True,
     ) -> SandboxStartResponse:
         response = await self.start_async(
             config,
             user_info=user_info,
             cluster_info=cluster_info,
             use_template_resource_spec=use_template_resource_spec,
+            apply_image_mirror=apply_image_mirror,
         )
         sandbox_id = response.sandbox_id
-        deadline = time.time() + REQUEST_TIMEOUT_SECONDS
-        with StageTimer("startup_timing", f"[{sandbox_id}] Wait sandbox running", logger):
+        wait_timeout = REQUEST_TIMEOUT_SECONDS if wait_timeout is None else wait_timeout
+
+        async def poll_until_running():
             while True:
                 await asyncio.sleep(1)
                 status = await self.get_status(sandbox_id)
                 if status.is_alive and status.host_ip:
-                    break
-                if time.time() >= deadline:
-                    raise TimeoutError(f"sandbox {sandbox_id} not running after {REQUEST_TIMEOUT_SECONDS}s")
+                    return
+
+        with StageTimer("startup_timing", f"[{sandbox_id}] Wait sandbox running", logger):
+            try:
+                await asyncio.wait_for(poll_until_running(), timeout=wait_timeout)
+            except asyncio.TimeoutError as exc:
+                raise TimeoutError(f"sandbox {sandbox_id} not running after {wait_timeout}s") from exc
         return response
 
     @monitor_sandbox_operation()
